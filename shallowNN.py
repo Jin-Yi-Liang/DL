@@ -6,36 +6,44 @@ from sklearn.model_selection import train_test_split
 def sigmoid(z):
     return 1/(1+np.exp(-z))
 
-def drawDecisionBoundary(X_train, w1, b1, w2, b2):
-    x1_min = X_train[0, :].min() - 0.5
-    x1_max = X_train[0, :].max() + 0.5
-    x2_min = X_train[1, :].min() - 0.5
-    x2_max = X_train[1, :].max() + 0.5
+def draw_decision_boundary(X, Y, w1, b1, w2, b2):
+    # 1. 确定绘图范围
+    x1_min = X[0, :].min() - 0.5
+    x1_max = X[0, :].max() + 0.5
+    x2_min = X[1, :].min() - 0.5
+    x2_max = X[1, :].max() + 0.5
 
+    # 2. 在整个平面上生成大量坐标点
     xx, yy = np.meshgrid(
         np.arange(x1_min, x1_max, 0.01),
         np.arange(x2_min, x2_max, 0.01)
     )
 
+    # 3. 整理成神经网络要求的 (2, m)
     grid_points = np.c_[
         xx.ravel(),
         yy.ravel()
     ].T
 
-    grid_Z1 = w1 @ grid_points + b1
-    grid_A1 = np.tanh(grid_Z1)
-
-    grid_Z2 = w2 @ grid_A1 + b2
-    grid_A2 = sigmoid(grid_Z2)
+    # 4. 使用训练好的网络预测所有网格点
+    _, _, _, grid_a2 = forward_propagation(
+        grid_points,
+        w1,
+        b1,
+        w2,
+        b2
+    )
 
     grid_predictions = np.where(
-        grid_A2 >= 0.5,
+        grid_a2 >= 0.5,
         1,
         0
     )
 
+    # 5. 恢复成二维网格
     grid_predictions = grid_predictions.reshape(xx.shape)
 
+    # 6. 画模型预测区域
     plt.contourf(
         xx,
         yy,
@@ -43,7 +51,12 @@ def drawDecisionBoundary(X_train, w1, b1, w2, b2):
         alpha=0.4
     )
 
-
+    # 7. 把真实样本也画上去
+    plt.scatter(
+        X[0, :],
+        X[1, :],
+        c=Y.ravel()
+    )
     plt.xlabel("x1")
     plt.ylabel("x2")
     plt.title("Decision Boundary")
@@ -119,8 +132,8 @@ for i in range(num_iterations):
 ## training accuracy
 predict(X_train, Y_train, w1, b1, w2, b2, "Training")
 
-## draw the decision boundary
-## drawDecisionBoundary(X_train, w1, b1, w2, b2)
-
 ## testing accuracy
 predict(X_test,Y_test, w1, b1, w2, b2, "Testing")
+
+## draw the decision boundary
+draw_decision_boundary(X_train, Y_train, w1, b1, w2, b2)
