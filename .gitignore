@@ -1,0 +1,5 @@
+mxnet/*
+paddle/*
+pytorch/*
+tensorflow/*
+*.zip
