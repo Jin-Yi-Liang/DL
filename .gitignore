@@ -3,3 +3,5 @@ paddle/*
 pytorch/*
 tensorflow/*
 *.zip
+.venv310/*
+.venv-gpu/*
