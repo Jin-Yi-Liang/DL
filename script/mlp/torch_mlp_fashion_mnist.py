@@ -2,8 +2,6 @@ import torch
 import torchvision
 import matplotlib
 
-# 解决 Ubuntu 下 Matplotlib Agg 后端无法弹窗的问题
-# 将图像直接保存成 PNG
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -19,10 +17,11 @@ from torchvision import transforms
 
 BATCH_SIZE = 256
 NUM_EPOCHS = 5
-LEARNING_RATE = 0.1
+LEARNING_RATE = 0.01
 
 NUM_INPUTS = 28 * 28
 NUM_CLASSES = 10
+HIDDEN_INPUT = 256
 
 # 设置随机种子，尽可能保证实验可复现
 torch.manual_seed(42)
@@ -98,9 +97,10 @@ model = nn.Sequential(
 
     # (B, 1, 28, 28) -> (B, 784)
     nn.Flatten(),
-
+    nn.Linear(NUM_INPUTS,HIDDEN_INPUT),
+    nn.ReLU(),
     # (B, 784) -> (B, 10)
-    nn.Linear(NUM_INPUTS, NUM_CLASSES)
+    nn.Linear(HIDDEN_INPUT, NUM_CLASSES)
 )
 
 # 初始化权重
@@ -109,10 +109,18 @@ nn.init.normal_(
     mean=0.0,
     std=0.01
 )
-
 # 初始化偏置
 nn.init.zeros_(
     model[1].bias
+)
+
+nn.init.normal_(
+    model[3].weight,
+    mean=0,
+    std=0.01
+)
+nn.init.zeros_(
+    model[3].bias
 )
 
 # 将模型移动到 CPU 或 GPU
