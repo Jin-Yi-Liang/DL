@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, random_split
 
 torch.manual_seed(42)
 
-num_epochs = 10
+num_epochs = 20
 learning_rate = 0.5
 batch_size = 256
 
@@ -100,16 +100,10 @@ net = nn.Sequential(
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
-        nn.init.normal_(
-            m.weight,
-            mean=0,
-            std=0.01
-        )
+        nn.init.xavier_normal_(m.weight)
         nn.init.zeros_(m.bias)
 
-
 net.apply(init_weights)
-
 net = net.to(device)
 
 
