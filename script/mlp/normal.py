@@ -1,496 +1,343 @@
+import time
+import copy
+
 import torch
-import torchvision
-import matplotlib
-
-matplotlib.use("Agg")
-
+import torch.nn as nn
 import matplotlib.pyplot as plt
 
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import transforms
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
 
 
-# =========================================================
-# 1. 基础配置
-# =========================================================
+# ==========================================
+# 1. 超参数
+# ==========================================
 
-BATCH_SIZE = 256
-NUM_EPOCHS = 5
-LEARNING_RATE = 0.01
-
-NUM_INPUTS = 28 * 28
-NUM_CLASSES = 10
-HIDDEN_INPUT = 256
-
-# 设置随机种子，尽可能保证实验可复现
 torch.manual_seed(42)
 
-# 自动选择 CPU 或 GPU
+num_epochs = 10
+learning_rate = 0.5
+batch_size = 256
+
+dropout1 = 0.2
+dropout2 = 0.5
+
 device = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
 )
 
-print("当前训练设备:", device)
+print("Device:", device)
 
 
-# =========================================================
-# 2. 加载 Fashion-MNIST 数据集
-# =========================================================
+# ==========================================
+# 2. Fashion-MNIST 数据集
+# ==========================================
 
-# 将图片转换为 Tensor，并把像素值缩放到 [0, 1]
 transform = transforms.ToTensor()
 
-# 训练集
-train_dataset = torchvision.datasets.FashionMNIST(
-    root="../data",
+full_train_dataset = datasets.FashionMNIST(
+    root="./data",
     train=True,
-    transform=transform,
-    download=True
+    download=True,
+    transform=transform
 )
 
-# 测试集
-test_dataset = torchvision.datasets.FashionMNIST(
-    root="../data",
+test_dataset = datasets.FashionMNIST(
+    root="./data",
     train=False,
-    transform=transform,
-    download=True
+    download=True,
+    transform=transform
 )
 
-print("训练集样本数量:", len(train_dataset))
-print("测试集样本数量:", len(test_dataset))
-
-
-# =========================================================
-# 3. 创建 DataLoader
-# =========================================================
+# 从 60000 张训练图片中划出验证集
+train_dataset, val_dataset = random_split(
+    full_train_dataset,
+    [50000, 10000],
+    generator=torch.Generator().manual_seed(42)
+)
 
 train_loader = DataLoader(
-    dataset=train_dataset,
-    batch_size=BATCH_SIZE,
+    train_dataset,
+    batch_size=batch_size,
     shuffle=True,
     num_workers=0
 )
 
-test_loader = DataLoader(
-    dataset=test_dataset,
-    batch_size=BATCH_SIZE,
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=batch_size,
     shuffle=False,
     num_workers=0
 )
 
-print("训练集 Batch 数量:", len(train_loader))
-print("测试集 Batch 数量:", len(test_loader))
-
-# 查看 Batch 的 Tensor 形状
-X, y = next(iter(train_loader))
-
-print("X shape:", X.shape)
-print("y shape:", y.shape)
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    shuffle=False,
+    num_workers=0
+)
 
 
-# =========================================================
-# 4. 构建 Softmax 回归模型
-# =========================================================
+# ==========================================
+# 3. MLP 模型
+# ==========================================
 
-model = nn.Sequential(
-
-    # (B, 1, 28, 28) -> (B, 784)
+net = nn.Sequential(
     nn.Flatten(),
-    nn.Linear(NUM_INPUTS,HIDDEN_INPUT),
+
+    nn.Linear(784, 256),
     nn.ReLU(),
-    # (B, 784) -> (B, 10)
-    nn.Linear(HIDDEN_INPUT, NUM_CLASSES)
+
+    nn.Linear(256, 256),
+    nn.ReLU(),
+
+    nn.Linear(256, 10)
 )
 
-# 初始化权重
-nn.init.normal_(
-    model[1].weight,
-    mean=0.0,
-    std=0.01
-)
-# 初始化偏置
-nn.init.zeros_(
-    model[1].bias
-)
 
-nn.init.normal_(
-    model[3].weight,
-    mean=0,
-    std=0.01
-)
-nn.init.zeros_(
-    model[3].bias
-)
+# ==========================================
+# 4. 权重初始化
+# ==========================================
 
-# 将模型移动到 CPU 或 GPU
-model = model.to(device)
-
-print("\n模型结构:")
-print(model)
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.normal_(
+            m.weight,
+            mean=0,
+            std=0.01
+        )
+        nn.init.zeros_(m.bias)
 
 
-# =========================================================
-# 5. 定义损失函数
-# =========================================================
+net.apply(init_weights)
 
-# CrossEntropyLoss 内部完成 LogSoftmax + NLLLoss
-# 模型直接输出 Logits，不需要手动调用 Softmax
-criterion = nn.CrossEntropyLoss()
+net = net.to(device)
 
 
-# =========================================================
-# 6. 定义 SGD 优化器
-# =========================================================
+# ==========================================
+# 5. 损失函数与优化器
+# ==========================================
+
+loss_func = nn.CrossEntropyLoss()
 
 optimizer = torch.optim.SGD(
-    model.parameters(),
-    lr=LEARNING_RATE
+    net.parameters(),
+    lr=learning_rate
 )
 
 
-# =========================================================
-# 7. 训练一个 Epoch
-# =========================================================
+# ==========================================
+# 6. 训练函数
+# ==========================================
 
 def train_one_epoch():
 
-    # 切换到训练模式
-    model.train()
+    net.train()
 
-    # 用于统计整个 Epoch 的指标
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
 
-    # 遍历当前 Epoch 中的全部 Batch
     for X, y in train_loader:
 
-        # 将当前 Batch 移动到训练设备
         X = X.to(device)
         y = y.to(device)
 
-        # -------------------------------
-        # Step 1：前向传播
-        # -------------------------------
+        # 前向传播（Dropout 启用）
+        logits = net(X)
 
-        logits = model(X)
-
-        # logits shape: (B, 10)
-
-        # -------------------------------
-        # Step 2：计算交叉熵损失
-        # -------------------------------
-
-        loss = criterion(logits, y)
-
-        # loss 是当前 Batch 的平均交叉熵
-
-        # -------------------------------
-        # Step 3：清空旧梯度
-        # -------------------------------
+        loss = loss_func(logits, y)
 
         optimizer.zero_grad()
 
-        # -------------------------------
-        # Step 4：反向传播
-        # -------------------------------
-
         loss.backward()
-
-        # -------------------------------
-        # Step 5：SGD 更新参数
-        # -------------------------------
 
         optimizer.step()
 
-        # -------------------------------
-        # Step 6：统计当前 Batch 指标
-        # -------------------------------
+        n = y.size(0)
 
-        batch_size = y.size(0)
+        total_loss += loss.item() * n
 
-        # 当前 Batch 的损失总和
-        total_loss += loss.item() * batch_size
+        prediction = logits.argmax(dim=1)
 
-        # 得到每个样本的预测类别
-        predictions = logits.argmax(dim=1)
+        total_correct += (
+            prediction == y
+        ).sum().item()
 
-        # 统计预测正确数量
-        correct = (predictions == y).sum().item()
+        total_samples += n
 
-        total_correct += correct
-
-        # 累计样本数量
-        total_samples += batch_size
-
-    # -----------------------------------
-    # 计算整个 Epoch 的指标
-    # -----------------------------------
-
-    epoch_loss = total_loss / total_samples
-
-    epoch_accuracy = total_correct / total_samples
-
-    return epoch_loss, epoch_accuracy
+    return (
+        total_loss / total_samples,
+        total_correct / total_samples
+    )
 
 
-# =========================================================
-# 8. 测试模型
-# =========================================================
+# ==========================================
+# 7. 评估函数
+# ==========================================
 
-def evaluate():
+def evaluate(loader):
 
-    # 切换到评估模式
-    model.eval()
+    net.eval()
 
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
 
-    # 测试阶段不需要计算梯度
     with torch.no_grad():
 
-        for X, y in test_loader:
+        for X, y in loader:
 
             X = X.to(device)
             y = y.to(device)
 
-            # 前向传播
-            logits = model(X)
+            # 前向传播（Dropout 关闭）
+            logits = net(X)
 
-            # 计算交叉熵
-            loss = criterion(logits, y)
+            loss = loss_func(logits, y)
 
-            batch_size = y.size(0)
+            n = y.size(0)
 
-            # 累加损失
-            total_loss += loss.item() * batch_size
+            total_loss += loss.item() * n
 
-            # 预测类别
-            predictions = logits.argmax(dim=1)
+            prediction = logits.argmax(dim=1)
 
-            # 统计正确数量
             total_correct += (
-                predictions == y
+                prediction == y
             ).sum().item()
 
-            total_samples += batch_size
+            total_samples += n
 
-    # 测试集平均损失
-    test_loss = total_loss / total_samples
-
-    # 测试集准确率
-    test_accuracy = total_correct / total_samples
-
-    return test_loss, test_accuracy
-
-
-# =========================================================
-# 9. 完整训练循环
-# =========================================================
-
-# 记录训练历史
-history = {
-    "train_loss": [],
-    "train_accuracy": [],
-    "test_loss": [],
-    "test_accuracy": []
-}
-
-print("\n========== 开始训练 ==========\n")
-
-for epoch in range(NUM_EPOCHS):
-
-    # 训练一个 Epoch
-    train_loss, train_accuracy = train_one_epoch()
-
-    # 在测试集上评估
-    test_loss, test_accuracy = evaluate()
-
-    # 保存指标
-    history["train_loss"].append(train_loss)
-    history["train_accuracy"].append(train_accuracy)
-
-    history["test_loss"].append(test_loss)
-    history["test_accuracy"].append(test_accuracy)
-
-    # 输出当前 Epoch 的训练结果
-    print(
-        f"Epoch [{epoch + 1}/{NUM_EPOCHS}] | "
-        f"Train Loss: {train_loss:.4f} | "
-        f"Train Acc: {train_accuracy * 100:.2f}% | "
-        f"Test Loss: {test_loss:.4f} | "
-        f"Test Acc: {test_accuracy * 100:.2f}%"
+    return (
+        total_loss / total_samples,
+        total_correct / total_samples
     )
 
-print("\n========== 训练完成 ==========\n")
+
+# ==========================================
+# 8. 保存训练历史
+# ==========================================
+
+history = {
+    "train_loss": [],
+    "train_acc": [],
+    "val_loss": [],
+    "val_acc": []
+}
+
+best_val_loss = float("inf")
+best_state = None
 
 
-# =========================================================
-# 10. 绘制损失曲线
-# =========================================================
+# ==========================================
+# 9. 开始训练
+# ==========================================
 
-epochs = range(1, NUM_EPOCHS + 1)
+start_time = time.perf_counter()
+
+for epoch in range(num_epochs):
+
+    train_loss, train_acc = train_one_epoch()
+
+    val_loss, val_acc = evaluate(val_loader)
+
+    history["train_loss"].append(train_loss)
+    history["train_acc"].append(train_acc)
+
+    history["val_loss"].append(val_loss)
+    history["val_acc"].append(val_acc)
+
+    if val_loss < best_val_loss:
+
+        best_val_loss = val_loss
+
+        best_state = copy.deepcopy(
+            net.state_dict()
+        )
+
+    print(
+        f"Epoch {epoch + 1:02d} | "
+        f"Train Loss: {train_loss:.4f} | "
+        f"Train Acc: {train_acc:.4f} | "
+        f"Val Loss: {val_loss:.4f} | "
+        f"Val Acc: {val_acc:.4f}"
+    )
+
+
+# ==========================================
+# 10. 恢复最佳模型
+# ==========================================
+
+net.load_state_dict(best_state)
+
+test_loss, test_acc = evaluate(test_loader)
+
+if device.type == "cuda":
+    torch.cuda.synchronize()
+
+end_time = time.perf_counter()
+
+print("\nFinal Results")
+
+print(f"Test Loss: {test_loss:.4f}")
+print(f"Test Accuracy: {test_acc:.4f}")
+
+print(
+    f"Total Time: {end_time - start_time:.4f}s"
+)
+
+
+# ==========================================
+# 11. 绘制损失曲线
+# ==========================================
+
+epochs = range(1, num_epochs + 1)
 
 plt.figure(figsize=(8, 5))
 
 plt.plot(
     epochs,
     history["train_loss"],
-    marker="o",
     label="Train Loss"
 )
 
 plt.plot(
     epochs,
-    history["test_loss"],
-    marker="s",
-    label="Test Loss"
+    history["val_loss"],
+    label="Validation Loss"
 )
 
 plt.xlabel("Epoch")
 plt.ylabel("Cross Entropy Loss")
-plt.title("Fashion-MNIST - Loss")
+plt.title("Dropout MLP - Loss")
+
 plt.legend()
 plt.grid(True)
-
-plt.savefig(
-    "fashion_mnist_loss.png",
-    dpi=200,
-    bbox_inches="tight"
-)
-
-plt.close()
+plt.show()
 
 
-# =========================================================
-# 11. 绘制准确率曲线
-# =========================================================
+# ==========================================
+# 12. 绘制准确率曲线
+# ==========================================
 
 plt.figure(figsize=(8, 5))
 
 plt.plot(
     epochs,
-    history["train_accuracy"],
-    marker="o",
+    history["train_acc"],
     label="Train Accuracy"
 )
 
 plt.plot(
     epochs,
-    history["test_accuracy"],
-    marker="s",
-    label="Test Accuracy"
+    history["val_acc"],
+    label="Validation Accuracy"
 )
 
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
-plt.title("Fashion-MNIST - Accuracy")
+plt.title("Dropout MLP - Accuracy")
+
 plt.legend()
 plt.grid(True)
-
-plt.savefig(
-    "fashion_mnist_accuracy.png",
-    dpi=200,
-    bbox_inches="tight"
-)
-
-plt.close()
-
-
-# =========================================================
-# 12. 保存模型参数
-# =========================================================
-
-torch.save(
-    model.state_dict(),
-    "fashion_mnist_model.pth"
-)
-
-print("模型参数已保存：fashion_mnist_model.pth")
-
-
-# =========================================================
-# 13. 使用训练完成的模型进行预测
-# =========================================================
-
-class_names = [
-    "T-shirt/top",
-    "Trouser",
-    "Pullover",
-    "Dress",
-    "Coat",
-    "Sandal",
-    "Shirt",
-    "Sneaker",
-    "Bag",
-    "Ankle boot"
-]
-
-# 获取测试集中的一个 Batch
-X, y = next(iter(test_loader))
-
-model.eval()
-
-with torch.no_grad():
-
-    # 模型输出 Logits
-    logits = model(X.to(device))
-
-    # 得到预测类别
-    predictions = logits.argmax(dim=1).cpu()
-
-    # 转换为概率，便于查看预测置信度
-    probabilities = torch.softmax(
-        logits,
-        dim=1
-    ).cpu()
-
-# 显示 6 张测试图片
-fig, axes = plt.subplots(
-    1,
-    6,
-    figsize=(15, 3.5)
-)
-
-for i in range(6):
-
-    image = X[i].squeeze(0)
-
-    true_label = class_names[int(y[i])]
-
-    predicted_index = int(predictions[i])
-    predicted_label = class_names[predicted_index]
-
-    confidence = float(
-        probabilities[i, predicted_index]
-    )
-
-    axes[i].imshow(
-        image,
-        cmap="gray"
-    )
-
-    axes[i].set_title(
-        f"True: {true_label}\n"
-        f"Pred: {predicted_label}\n"
-        f"Prob: {confidence:.2f}",
-        fontsize=9
-    )
-
-    axes[i].axis("off")
-
-plt.tight_layout()
-
-plt.savefig(
-    "fashion_mnist_predictions.png",
-    dpi=200,
-    bbox_inches="tight"
-)
-
-plt.close()
-
-print("预测图片已保存：fashion_mnist_predictions.png")
-print("损失曲线已保存：fashion_mnist_loss.png")
-print("准确率曲线已保存：fashion_mnist_accuracy.png")
+plt.show()
