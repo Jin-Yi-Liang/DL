@@ -5,3 +5,4 @@ tensorflow/*
 *.zip
 .venv310/*
 .venv-gpu/*
+script/mlp/data/*
