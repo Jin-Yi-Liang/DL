@@ -1,3 +1,5 @@
+## MLP过拟合处理——weight decay权重衰减
+
 import time
 import copy
 
@@ -15,8 +17,8 @@ from torch.utils.data import DataLoader, random_split
 
 torch.manual_seed(42)
 
-num_epochs = 20
-learning_rate = 0.5
+num_epochs = 10
+learning_rate = 0.01
 batch_size = 256
 
 weight_decay = 0.001

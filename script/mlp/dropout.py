@@ -1,3 +1,5 @@
+## MLP过拟合处理——dropout暂退法
+
 import time
 import copy
 
@@ -16,7 +18,7 @@ from torch.utils.data import DataLoader, random_split
 torch.manual_seed(42)
 
 num_epochs = 10
-learning_rate = 0.5
+learning_rate = 0.01
 batch_size = 256
 
 dropout1 = 0.2
@@ -102,14 +104,9 @@ net = nn.Sequential(
 # ==========================================
 
 def init_weights(m):
-    if isinstance(m, nn.Linear):
-        nn.init.normal_(
-            m.weight,
-            mean=0,
-            std=0.01
-        )
+    if isinstance(m,nn.Linear):
+        nn.init.xavier_normal_(m.weight)
         nn.init.zeros_(m.bias)
-
 
 net.apply(init_weights)
 
