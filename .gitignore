@@ -6,3 +6,5 @@ tensorflow/*
 .venv310/*
 .venv-gpu/*
 script/mlp/data/*
+.idea/*
+script/rnn/__pycache__/*
