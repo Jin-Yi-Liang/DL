@@ -83,7 +83,6 @@ class RNNModelScratch:
 
     ## front propagation
     def rnn(self,input,state,params):
-        print("===== front propagation =====")
         w_xh,w_hh,b_h,w_hq,b_q=params
         h=state[0]
         outputs=[]
@@ -95,9 +94,6 @@ class RNNModelScratch:
             )
             logits_t=h@w_hq+b_q
             outputs.append(logits_t)
-        print("outputs length:",len(outputs))
-        print("outputs[0] shape:",outputs[0].shape)
-
         logits=torch.cat(
             outputs,
             dim=0
@@ -105,9 +101,39 @@ class RNNModelScratch:
         return logits,(h,)
 
 net=RNNModelScratch(vocab_size,num_hiddens,device)
-state=net.begin_state(batch_size,device)
-logits,new_state=net(x,state)
 
-print("输入:", x.shape)
-print("输出:", logits.shape)
-print("隐藏状态:", new_state[0].shape)
+@torch.no_grad()
+def predict(prefix,num_preds,net,vocab,device):
+    state=net.begin_state(batch_size=1,device=device)
+    outputs=[vocab[prefix[0]]]
+
+    def get_input():
+        return torch.tensor(
+            [[outputs[-1]]],
+            dtype=torch.long,
+            device=device
+        )
+
+    ## use the prefix to warm up the model
+    for char in prefix[1:]:
+        _,state=net(get_input(),state)
+        outputs.append(vocab[char])
+
+    ## predict the next tokens
+    for _ in range(num_preds):
+        logits,state=net(get_input(),state)
+        next_token=logits.argmax(dim=1).item()
+        outputs.append(next_token)
+    
+    return "".join(
+        vocab.idx_to_token[i] for i in outputs
+    )
+
+test=predict(
+    prefix="time traveller ",
+    num_preds=10,
+    net=net,
+    vocab=vocab,
+    device=device
+)
+print(test)
