@@ -15,8 +15,8 @@ batch_size=32
 num_step=35
 num_hiddens=512
 
-learning_rate=0.1
-num_epoch=2000
+learning_rate=1
+num_epoch=1000
 
 random.seed(42)
 torch.manual_seed(42)
