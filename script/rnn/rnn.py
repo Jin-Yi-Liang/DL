@@ -1,20 +1,26 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as f
 
 import math
 import time
+import random
 
 import matplotlib.pyplot as plt
 
 from time_machine_dataloader import load_time_machine_dataloader
 
 ## super parameters
-batch_size=32
+batch_size=32   
 num_step=35
 num_hiddens=512
 
-learning_rate=1.0
-num_epoch=500
+learning_rate=0.1
+num_epoch=2000
+
+random.seed(42)
+torch.manual_seed(42)
+
 print("batch size:",batch_size)
 print("num step:",num_step)
 print("num hiddens:",num_hiddens)
@@ -36,42 +42,23 @@ x,y=next(iter(train_loader))
 x=x.to(device)
 y=y.to(device)
 
-class RNNModelScratch:
+class RNNModelScratch(nn.Module):
     def __init__(self,vocab_size,num_hiddens,device):
+        super(RNNModelScratch, self).__init__()
         self.vocab_size = vocab_size
         self.num_hiddens = num_hiddens
-        self.params = self.get_params(vocab_size,num_hiddens,device)
+        self.w_xh = nn.Parameter(torch.randn(vocab_size,num_hiddens,device=device)*0.01)
+        self.w_hh = nn.Parameter(torch.randn(num_hiddens,num_hiddens,device=device)*0.01)
+        self.b_h = nn.Parameter(torch.zeros(num_hiddens,device=device))
+        self.w_hq = nn.Parameter(torch.randn(num_hiddens,vocab_size,device=device)*0.01)
+        self.b_q = nn.Parameter(torch.zeros(vocab_size,device=device))
 
-    def __call__(self, X, state):
+    def forward(self, X, state):
         inputs = f.one_hot(X.T,self.vocab_size).float()
-        return self.rnn(inputs,state,self.params)
+        return self.rnn(inputs,state)
 
     def begin_state(self, batch_size, device):
         return self.init_rnn_state(batch_size,self.num_hiddens,device)
-
-    ## init parameters of rnn model
-    def get_params(self,vocab_size,num_hiddens,device):
-        num_inputs=vocab_size
-        num_outputs=vocab_size
-
-        def normal(shape):
-            return torch.randn(
-                shape,
-                device=device
-            )*0.01
-        
-        w_xh=normal((num_inputs,num_hiddens))
-        w_hh=normal((num_hiddens,num_hiddens))
-        b_h=torch.zeros(num_hiddens,device=device)
-        w_hq=normal((num_hiddens,num_outputs))
-        b_q=torch.zeros(num_outputs,device=device)
-
-        params=[w_xh,w_hh,b_h,w_hq,b_q]
-
-        for param in params:
-            param.requires_grad_(True)
-
-        return params
 
     ## init hidden state of rnn model
     def init_rnn_state(self,batch_size,num_hiddens,device):
@@ -82,17 +69,16 @@ class RNNModelScratch:
         return (h,)
 
     ## front propagation
-    def rnn(self,input,state,params):
-        w_xh,w_hh,b_h,w_hq,b_q=params
+    def rnn(self,input,state):
         h=state[0]
         outputs=[]
         for x_t in input:
             h=torch.tanh(
-                x_t@w_xh
-                +h@w_hh
-                +b_h
+                x_t@self.w_xh
+                +h@self.w_hh
+                +self.b_h
             )
-            logits_t=h@w_hq+b_q
+            logits_t=h@self.w_hq+self.b_q
             outputs.append(logits_t)
         logits=torch.cat(
             outputs,
@@ -103,7 +89,8 @@ class RNNModelScratch:
 net=RNNModelScratch(vocab_size,num_hiddens,device)
 
 @torch.no_grad()
-def predict(prefix,num_preds,net,vocab,device):
+def predict(prefix,num_preds,net,vocab,device=device):
+    net.eval()
     state=net.begin_state(batch_size=1,device=device)
     outputs=[vocab[prefix[0]]]
 
@@ -129,11 +116,66 @@ def predict(prefix,num_preds,net,vocab,device):
         vocab.idx_to_token[i] for i in outputs
     )
 
-test=predict(
-    prefix="time traveller ",
-    num_preds=10,
-    net=net,
-    vocab=vocab,
-    device=device
+def train_one_epoch(train_loader,net,optimizer,use_random_iter=False,device=device):
+    net.train()
+    total_loss=0
+    total_tokens=0
+    state=None
+    start_time=time.perf_counter()
+    for X,Y in train_loader:
+        X=X.to(device)
+        Y=Y.to(device)
+        if state is None or use_random_iter:
+            state=net.begin_state(batch_size=X.shape[0],device=device)
+        else:
+            state=tuple(s.detach() for s in state)
+        optimizer.zero_grad()
+        logits,state=net(X,state)
+        y=Y.T.reshape(-1)
+        loss=f.cross_entropy(logits,y)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(net.parameters(),max_norm=1.0)
+        optimizer.step()
+        num_token=y.numel()
+        total_loss+=loss.item()*num_token
+        total_tokens+=num_token
+    avg_loss=total_loss/total_tokens
+    ppl=math.exp(avg_loss)
+    if device.type=="cuda":
+        torch.cuda.synchronize()
+    elapsed=time.perf_counter()-start_time
+    speed=total_tokens/elapsed
+    return avg_loss,ppl,speed
+
+optimizer=torch.optim.SGD(
+    net.parameters(),
+    lr=learning_rate
 )
-print(test)
+
+def train(train_loader,net,vocab,optimizer,device,num_epoches=500):
+    history=[]
+    for epoch in range(num_epoches):
+        avg_loss,ppl,speed=train_one_epoch(train_loader,net,optimizer)
+        history.append(ppl)
+        if (epoch+1)%50 == 0:
+            print(f"===== epoch: {epoch+1} =====")
+            print(f"loss: {avg_loss}")
+            print(f"ppl: {ppl}")
+            print(f"speed: {speed} token/s")
+            print(predict("time traveller ",200,net,vocab,device))
+    return history
+
+history=train(train_loader,net,vocab,optimizer,device,num_epoches=num_epoch)
+
+def plot_plexity(history):
+    epoches=range(1,len(history)+1)
+    plt.figure(figsize=(8,5))
+    plt.plot(epoches,history,label="Training ppl")
+    plt.xlabel("Epoch")
+    plt.ylabel("Perplexity")
+    plt.title("RNN training")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("rnn_train_ppl.png",dpi=150)
+plot_plexity(history)
